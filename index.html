@@ -1,0 +1,838 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>File Converter Pro</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- pdf-lib for PDF creation/merging -->
+    <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+    <!-- pdf.js for rendering PDF pages (previews and PDF->Image) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <!-- JSZip for creating zip files -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <!-- SortableJS for drag-and-drop reordering -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.0/Sortable.min.js"></script>
+    
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .file-input-label:hover {
+            background-color: #f0f4f8;
+            border-color: #3b82f6;
+        }
+        .file-item, .page-item {
+            transition: all 0.2s ease-in-out;
+            border-radius: 0.5rem;
+            cursor: grab;
+        }
+        .file-item:active, .page-item:active {
+            cursor: grabbing;
+        }
+        .file-item.sortable-ghost, .page-item.sortable-ghost {
+            background: #dbeafe;
+            opacity: 0.5;
+        }
+        .loader {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3498db;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 flex items-center justify-center min-h-screen p-4">
+    <div class="w-full max-w-5xl mx-auto bg-white rounded-2xl shadow-2xl shadow-slate-200 p-6 md:p-10">
+        <header class="text-center mb-8">
+            <h1 class="text-3xl md:text-4xl font-bold text-slate-900">
+                File Converter Pro
+                <span class="text-base align-middle font-normal text-slate-400 ml-2">by Roshan Koirala</span>
+            </h1>
+            <p class="text-slate-500 mt-2">Edit, convert, & merge files with automatic type detection.</p>
+        </header>
+
+        <main>
+            <!-- Step 1: File Upload -->
+            <div class="mb-6">
+                <label for="file-upload" class="file-input-label flex flex-col items-center justify-center w-full h-48 border-2 border-dashed border-slate-300 rounded-lg cursor-pointer bg-slate-50">
+                    <div class="flex flex-col items-center justify-center pt-5 pb-6">
+                        <svg class="w-10 h-10 mb-3 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
+                        <p class="mb-2 text-sm text-slate-500"><span class="font-semibold">Click to upload</span> or drag and drop</p>
+                        <p class="text-xs text-slate-500">PDF, JPG, JPEG, PNG, WEBP</p>
+                    </div>
+                    <input id="file-upload" type="file" class="hidden" multiple accept=".pdf,.jpg,.jpeg,.png,.webp"/>
+                </label>
+            </div>
+            
+            <!-- File Preview Area -->
+            <div id="file-preview-container" class="hidden space-y-3 mb-6">
+                <h3 class="text-lg font-semibold text-slate-700 border-b pb-2">Selected Files (drag to reorder):</h3>
+                <div id="file-list" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4"></div>
+            </div>
+
+            <!-- Step 2: Output Format Selection -->
+            <div id="output-format-section" class="hidden mb-6">
+                <label for="output-format" class="block mb-2 text-lg font-semibold text-slate-700">Output Format:</label>
+                <select id="output-format" class="w-full p-3 bg-slate-100 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                    <option value="png">PNG</option>
+                    <option value="jpeg">JPEG</option>
+                    <option value="webp">WEBP</option>
+                    <option value="pdf">PDF</option>
+                </select>
+                
+                <div id="conversion-mode-container" class="hidden mt-4 space-y-2">
+                    <p class="text-sm font-medium text-slate-600">How do you want to handle multiple files?</p>
+                    <div class="flex gap-4">
+                         <label class="flex items-center">
+                            <input type="radio" name="conversion-mode" value="combine" class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300" checked>
+                            <span id="combine-label" class="ml-2 text-sm text-slate-600">Combine into a single file</span>
+                        </label>
+                        <label class="flex items-center">
+                            <input type="radio" name="conversion-mode" value="separate" class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300">
+                            <span class="ml-2 text-sm text-slate-600">Convert each file separately</span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 3: Convert Button -->
+            <div id="convert-button-section" class="hidden text-center">
+                <button id="convert-btn" class="w-full md:w-1/2 bg-blue-600 text-white font-bold py-3 px-6 rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-4 focus:ring-blue-300 transition-all duration-300 transform hover:scale-105">
+                    Convert Files
+                </button>
+            </div>
+
+            <!-- Step 4: Results -->
+            <div id="results-container" class="hidden mt-8">
+                <h3 class="text-xl font-bold text-slate-800 border-b pb-2 mb-4">Conversion Results</h3>
+                <div id="results-list" class="space-y-4"></div>
+            </div>
+            
+            <!-- Modals -->
+            <div id="message-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                <div class="bg-white rounded-lg shadow-xl p-6 max-w-sm w-full text-center">
+                    <p id="modal-message" class="text-lg text-slate-700 mb-4"></p>
+                    <button id="modal-close-btn" class="bg-blue-600 text-white font-semibold py-2 px-4 rounded-lg hover:bg-blue-700">OK</button>
+                </div>
+            </div>
+            <div id="preview-modal" class="hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4">
+                <div class="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] flex flex-col">
+                    <header class="p-4 border-b flex justify-between items-center">
+                        <h2 id="preview-title" class="text-lg font-semibold text-slate-800">File Preview</h2>
+                        <button id="preview-close-btn" class="text-slate-500 hover:text-slate-800">&times;</button>
+                    </header>
+                    <div id="preview-content" class="p-4 overflow-auto flex items-center justify-center flex-grow"></div>
+                </div>
+            </div>
+            <div id="image-editor-modal" class="hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4">
+                <div class="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+                     <header class="p-4 border-b flex justify-between items-center">
+                        <h2 id="image-editor-title" class="text-lg font-semibold text-slate-800">Edit Image</h2>
+                        <button id="image-editor-close-btn" class="text-slate-500 hover:text-slate-800">&times;</button>
+                    </header>
+                    <div class="p-4 flex-grow overflow-auto flex items-center justify-center">
+                        <canvas id="image-editor-canvas"></canvas>
+                    </div>
+                    <footer class="p-4 border-t flex justify-between items-center">
+                        <div>
+                            <button id="image-rotate-btn" class="bg-gray-200 px-3 py-2 rounded-md text-sm font-semibold hover:bg-gray-300">Rotate 90°</button>
+                        </div>
+                        <div>
+                            <button id="image-editor-cancel-btn" class="bg-gray-500 text-white px-4 py-2 rounded-md text-sm font-semibold hover:bg-gray-600 mr-2">Cancel</button>
+                            <button id="image-editor-save-btn" class="bg-blue-600 text-white px-4 py-2 rounded-md text-sm font-semibold hover:bg-blue-700">Save Changes</button>
+                        </div>
+                    </footer>
+                </div>
+            </div>
+             <div id="pdf-editor-modal" class="hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4">
+                <div class="bg-white rounded-lg shadow-xl w-full max-w-6xl max-h-[90vh] flex flex-col">
+                     <header class="p-4 border-b flex justify-between items-center">
+                        <h2 id="pdf-editor-title" class="text-lg font-semibold text-slate-800">Edit PDF Pages</h2>
+                        <button id="pdf-editor-close-btn" class="text-slate-500 hover:text-slate-800">&times;</button>
+                    </header>
+                    <div id="pdf-page-list" class="p-4 flex-grow overflow-auto grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
+                        <!-- PDF page thumbnails will be injected here -->
+                    </div>
+                    <footer class="p-4 border-t flex justify-end items-center">
+                        <button id="pdf-editor-cancel-btn" class="bg-gray-500 text-white px-4 py-2 rounded-md text-sm font-semibold hover:bg-gray-600 mr-2">Cancel</button>
+                        <button id="pdf-editor-save-btn" class="bg-blue-600 text-white px-4 py-2 rounded-md text-sm font-semibold hover:bg-blue-700">Save Changes</button>
+                    </footer>
+                </div>
+            </div>
+
+        </main>
+    </div>
+
+    <script>
+        // --- DOM Element References ---
+        const fileUpload = document.getElementById('file-upload');
+        const filePreviewContainer = document.getElementById('file-preview-container');
+        const fileList = document.getElementById('file-list');
+        const outputFormatSection = document.getElementById('output-format-section');
+        const outputFormatSelect = document.getElementById('output-format');
+        const conversionModeContainer = document.getElementById('conversion-mode-container');
+        const combineLabel = document.getElementById('combine-label');
+        const convertButtonSection = document.getElementById('convert-button-section');
+        const convertBtn = document.getElementById('convert-btn');
+        const resultsContainer = document.getElementById('results-container');
+        const resultsList = document.getElementById('results-list');
+        
+        // Modals
+        const messageModal = document.getElementById('message-modal');
+        const modalMessage = document.getElementById('modal-message');
+        const modalCloseBtn = document.getElementById('modal-close-btn');
+        
+        const previewModal = document.getElementById('preview-modal');
+        const previewTitle = document.getElementById('preview-title');
+        const previewContent = document.getElementById('preview-content');
+        const previewCloseBtn = document.getElementById('preview-close-btn');
+
+        const imageEditorModal = document.getElementById('image-editor-modal');
+        const imageEditorTitle = document.getElementById('image-editor-title');
+        const imageEditorCanvas = document.getElementById('image-editor-canvas');
+        const imageEditorCloseBtn = document.getElementById('image-editor-close-btn');
+        const imageRotateBtn = document.getElementById('image-rotate-btn');
+        const imageEditorCancelBtn = document.getElementById('image-editor-cancel-btn');
+        const imageEditorSaveBtn = document.getElementById('image-editor-save-btn');
+        
+        const pdfEditorModal = document.getElementById('pdf-editor-modal');
+        const pdfEditorTitle = document.getElementById('pdf-editor-title');
+        const pdfPageList = document.getElementById('pdf-page-list');
+        const pdfEditorCloseBtn = document.getElementById('pdf-editor-close-btn');
+        const pdfEditorCancelBtn = document.getElementById('pdf-editor-cancel-btn');
+        const pdfEditorSaveBtn = document.getElementById('pdf-editor-save-btn');
+
+        // --- State Management ---
+        let selectedFiles = []; // Array of objects: { id, originalFile, editedBlob, type, rotation, pageData }
+        let currentEditingFileId = null;
+
+        // --- Library Initialization ---
+        const { PDFDocument, degrees } = PDFLib;
+        const pdfjsLib = window['pdfjs-dist/build/pdf'];
+        if (pdfjsLib) {
+            pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js`;
+        }
+
+        // --- Event Listeners ---
+        fileUpload.addEventListener('change', handleFileSelect);
+        convertBtn.addEventListener('click', handleConversion);
+        outputFormatSelect.addEventListener('change', updateUiOptions);
+        modalCloseBtn.addEventListener('click', () => messageModal.classList.add('hidden'));
+        previewCloseBtn.addEventListener('click', () => previewModal.classList.add('hidden'));
+        fileList.addEventListener('click', handleFileAction);
+        
+        // Image Editor Listeners
+        imageEditorCloseBtn.addEventListener('click', () => imageEditorModal.classList.add('hidden'));
+        imageEditorCancelBtn.addEventListener('click', () => imageEditorModal.classList.add('hidden'));
+        imageRotateBtn.addEventListener('click', rotateImageInEditor);
+        imageEditorSaveBtn.addEventListener('click', saveImageEdits);
+
+        // PDF Editor Listeners
+        pdfEditorCloseBtn.addEventListener('click', () => pdfEditorModal.classList.add('hidden'));
+        pdfEditorCancelBtn.addEventListener('click', () => pdfEditorModal.classList.add('hidden'));
+        pdfEditorSaveBtn.addEventListener('click', savePdfEdits);
+        pdfPageList.addEventListener('click', handlePdfPageAction);
+
+        // --- Main Functions ---
+
+        function showMessage(message) {
+            modalMessage.textContent = message;
+            messageModal.classList.remove('hidden');
+        }
+
+        async function handleFileSelect(e) {
+            const newFiles = Array.from(e.target.files);
+            for (const file of newFiles) {
+                if (!selectedFiles.some(f => f.originalFile.name === file.name)) {
+                     const fileObject = {
+                        id: crypto.randomUUID(),
+                        originalFile: file,
+                        editedBlob: null,
+                        type: getFileType(file),
+                        rotation: 0, // For images
+                        pageData: null // For PDFs
+                    };
+                    selectedFiles.push(fileObject);
+                }
+            }
+            if (selectedFiles.length > 0) {
+                await displayFilePreviews();
+                outputFormatSection.classList.remove('hidden');
+                convertButtonSection.classList.remove('hidden');
+                resultsContainer.classList.add('hidden');
+                resultsList.innerHTML = '';
+                updateUiOptions();
+            }
+        }
+        
+        function hideAllSections() {
+            filePreviewContainer.classList.add('hidden');
+            outputFormatSection.classList.add('hidden');
+            convertButtonSection.classList.add('hidden');
+            resultsContainer.classList.add('hidden');
+        }
+
+        function updateUiOptions() {
+            const outputFormat = outputFormatSelect.value;
+            if (selectedFiles.length > 1) {
+                conversionModeContainer.classList.remove('hidden');
+                combineLabel.textContent = (outputFormat === 'pdf') ? 'Merge into a single PDF' : 'Combine into a single ZIP';
+            } else {
+                conversionModeContainer.classList.add('hidden');
+            }
+        }
+
+        async function displayFilePreviews() {
+            fileList.innerHTML = '';
+            for (const fileObject of selectedFiles) {
+                const fileItem = document.createElement('div');
+                fileItem.className = 'file-item flex flex-col p-3 bg-slate-100 rounded-lg border border-slate-200';
+                fileItem.dataset.id = fileObject.id;
+                
+                const fileType = fileObject.type;
+                const fileName = fileObject.originalFile.name;
+                const fileSize = (fileObject.editedBlob || fileObject.originalFile).size;
+
+                fileItem.innerHTML = `
+                    <div class="flex items-center w-full">
+                        <div class="flex-shrink-0 mr-3">${getIconForFileType(fileType)}</div>
+                        <div class="flex-grow overflow-hidden">
+                            <p class="font-semibold text-sm text-slate-800 truncate" title="${fileName}">${fileName}</p>
+                            <p class="text-xs text-slate-500">${fileType.toUpperCase()} - ${(fileSize / 1024).toFixed(2)} KB</p>
+                        </div>
+                    </div>
+                    <div class="mt-2 pt-2 border-t w-full flex justify-end items-center gap-2">
+                        <button class="preview-btn text-xs bg-gray-200 text-gray-700 hover:bg-gray-300 px-2 py-1 rounded">Preview</button>
+                        <button class="edit-btn text-xs bg-blue-100 text-blue-700 hover:bg-blue-200 px-2 py-1 rounded">
+                            ${fileType === 'pdf' ? 'Edit Pages' : 'Edit'}
+                        </button>
+                        <button class="delete-btn text-red-500 hover:text-red-700 p-1 rounded-full">
+                            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm4 0a1 1 0 012 0v6a1 1 0 11-2 0V8z" clip-rule="evenodd"></path></svg>
+                        </button>
+                    </div>
+                `;
+                fileList.appendChild(fileItem);
+            }
+            filePreviewContainer.classList.remove('hidden');
+            initSortable();
+        }
+        
+        function initSortable() {
+            if (window.Sortable) {
+                new Sortable(fileList, { animation: 150, ghostClass: 'sortable-ghost', onEnd: syncFileOrder });
+            }
+        }
+
+        function syncFileOrder() {
+            const newOrder = [...fileList.children].map(item => item.dataset.id);
+            selectedFiles.sort((a, b) => newOrder.indexOf(a.id) - newOrder.indexOf(b.id));
+        }
+
+        function getFileType(file) {
+            // FIX: Check if file exists before accessing properties
+            if (!file) return 'unknown';
+            const mimeType = file.type;
+            const fileName = file.name ? file.name.toLowerCase() : '';
+            if (mimeType === 'application/pdf' || fileName.endsWith('.pdf')) return 'pdf';
+            if (mimeType === 'image/jpeg' || fileName.endsWith('.jpg') || fileName.endsWith('.jpeg')) return 'jpeg';
+            if (mimeType === 'image/png' || fileName.endsWith('.png')) return 'png';
+            if (mimeType === 'image/webp' || fileName.endsWith('.webp')) return 'webp';
+            return 'unknown';
+        }
+        
+        function getIconForFileType(fileType) {
+            switch(fileType) {
+                case 'pdf': return '<svg class="w-8 h-8 text-red-500" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M4 2a2 2 0 00-2 2v12a2 2 0 002 2h12a2 2 0 002-2V8.828a2 2 0 00-.586-1.414l-4.414-4.414A2 2 0 0011.172 2H4zm6 6a1 1 0 011 1v2a1 1 0 11-2 0V9a1 1 0 011-1z" clip-rule="evenodd"></path></svg>';
+                case 'jpeg': case 'png': case 'webp': return '<svg class="w-8 h-8 text-blue-500" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm12 12H4l4-4 2 2 4-4 2 2z" clip-rule="evenodd"></path></svg>';
+                case 'zip': return '<svg class="w-8 h-8 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>';
+                default: return '<svg class="w-8 h-8 text-slate-400" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"></path></svg>';
+            }
+        }
+
+        async function handleFileAction(e) {
+            const button = e.target.closest('button');
+            if (!button) return;
+            const fileItem = button.closest('.file-item');
+            const fileId = fileItem.dataset.id;
+            const fileObject = selectedFiles.find(f => f.id === fileId);
+            if (!fileObject) return;
+
+            if (button.classList.contains('preview-btn')) {
+                await showPreview(fileObject);
+            } else if (button.classList.contains('edit-btn')) {
+                currentEditingFileId = fileId;
+                if (fileObject.type === 'pdf') {
+                    await openPdfEditor(fileObject);
+                } else {
+                    await openImageEditor(fileObject);
+                }
+            } else if (button.classList.contains('delete-btn')) {
+                selectedFiles = selectedFiles.filter(f => f.id !== fileId);
+                await displayFilePreviews();
+                if (selectedFiles.length === 0) hideAllSections();
+                else updateUiOptions();
+            }
+        }
+
+        async function showPreview(fileObject) {
+            const file = fileObject.editedBlob || fileObject.originalFile;
+            previewTitle.textContent = fileObject.originalFile.name;
+            previewContent.innerHTML = '<div class="loader"></div>';
+            previewModal.classList.remove('hidden');
+
+            const fileType = fileObject.type; // Use stored type
+            if (['jpeg', 'png', 'webp'].includes(fileType)) {
+                const url = URL.createObjectURL(file);
+                const img = document.createElement('img');
+                img.className = 'max-w-full max-h-full';
+                img.onload = () => URL.revokeObjectURL(url);
+                img.src = url;
+                previewContent.innerHTML = '';
+                previewContent.appendChild(img);
+            } else if (fileType === 'pdf') {
+                const arrayBuffer = await file.arrayBuffer();
+                const pdfDoc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+                const page = await pdfDoc.getPage(1);
+                const viewport = page.getViewport({ scale: 1.5 });
+                const canvas = document.createElement('canvas');
+                const context = canvas.getContext('2d');
+                canvas.height = viewport.height;
+                canvas.width = viewport.width;
+                await page.render({ canvasContext: context, viewport: viewport }).promise;
+                previewContent.innerHTML = '';
+                previewContent.appendChild(canvas);
+            } else {
+                previewContent.innerHTML = '<p class="text-slate-500">Preview not available.</p>';
+            }
+        }
+        
+        // --- Editor Functions ---
+
+        async function openImageEditor(fileObject) {
+            currentEditingFileId = fileObject.id;
+            imageEditorTitle.textContent = `Editing: ${fileObject.originalFile.name}`;
+            const file = fileObject.editedBlob || fileObject.originalFile;
+            
+            const img = new Image();
+            const url = URL.createObjectURL(file);
+            img.onload = () => {
+                imageEditorCanvas.width = img.width;
+                imageEditorCanvas.height = img.height;
+                imageEditorCanvas.getContext('2d').drawImage(img, 0, 0);
+                imageEditorModal.classList.remove('hidden');
+                URL.revokeObjectURL(url);
+            };
+            img.src = url;
+        }
+
+        function rotateImageInEditor() {
+            const ctx = imageEditorCanvas.getContext('2d');
+            const { width, height } = imageEditorCanvas;
+            
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = width;
+            tempCanvas.height = height;
+            tempCanvas.getContext('2d').drawImage(imageEditorCanvas, 0, 0);
+
+            imageEditorCanvas.width = height;
+            imageEditorCanvas.height = width;
+            ctx.translate(height, 0);
+            ctx.rotate(degreesToRadians(90));
+            ctx.drawImage(tempCanvas, 0, 0);
+        }
+
+        function degreesToRadians(degrees) {
+            return degrees * (Math.PI / 180);
+        }
+
+        async function saveImageEdits() {
+            if (!currentEditingFileId) return;
+            imageEditorCanvas.toBlob(async (blob) => {
+                const fileIndex = selectedFiles.findIndex(f => f.id === currentEditingFileId);
+                if (fileIndex > -1) {
+                    selectedFiles[fileIndex].editedBlob = blob;
+                    await displayFilePreviews();
+                }
+                imageEditorModal.classList.add('hidden');
+                currentEditingFileId = null;
+            });
+        }
+
+        async function openPdfEditor(fileObject) {
+            currentEditingFileId = fileObject.id;
+            pdfEditorTitle.textContent = `Editing: ${fileObject.originalFile.name}`;
+            pdfPageList.innerHTML = '<div class="col-span-full flex justify-center items-center"><div class="loader"></div></div>';
+            pdfEditorModal.classList.remove('hidden');
+
+            const file = fileObject.editedBlob || fileObject.originalFile;
+            const arrayBuffer = await file.arrayBuffer();
+            const pdfDoc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+            
+            if (!fileObject.pageData) {
+                fileObject.pageData = {
+                    order: Array.from({length: pdfDoc.numPages}, (_, i) => i),
+                    rotations: {}
+                };
+            }
+
+            pdfPageList.innerHTML = '';
+            for (const pageIndex of fileObject.pageData.order) {
+                const page = await pdfDoc.getPage(pageIndex + 1);
+                const viewport = page.getViewport({ scale: 1.2 });
+                const canvas = document.createElement('canvas');
+                const context = canvas.getContext('2d');
+                canvas.height = viewport.height;
+                canvas.width = viewport.width;
+                await page.render({ canvasContext: context, viewport: viewport }).promise;
+
+                const rotation = fileObject.pageData.rotations[pageIndex] || 0;
+
+                const pageItem = document.createElement('div');
+                pageItem.className = 'page-item flex flex-col items-center p-2 bg-white rounded-lg border';
+                pageItem.dataset.pageIndex = pageIndex;
+                pageItem.innerHTML = `
+                    <div class="w-full h-48 flex items-center justify-center overflow-hidden border bg-gray-200">
+                        <canvas class="max-w-full max-h-full border" style="transform: rotate(${rotation}deg);"></canvas>
+                    </div>
+                    <p class="text-sm mt-2 font-medium">Page ${pageIndex + 1}</p>
+                    <button class="rotate-page-btn mt-1 text-xs bg-blue-100 text-blue-700 hover:bg-blue-200 px-2 py-1 rounded">Rotate 90°</button>
+                `;
+                pageItem.querySelector('canvas').getContext('2d').drawImage(canvas, 0, 0);
+                pdfPageList.appendChild(pageItem);
+            }
+            
+            new Sortable(pdfPageList, { animation: 150, ghostClass: 'sortable-ghost' });
+        }
+
+        function handlePdfPageAction(e) {
+            if (e.target.classList.contains('rotate-page-btn')) {
+                const pageItem = e.target.closest('.page-item');
+                const canvas = pageItem.querySelector('canvas');
+                const pageIndex = parseInt(pageItem.dataset.pageIndex);
+                const fileObject = selectedFiles.find(f => f.id === currentEditingFileId);
+                
+                if (fileObject && fileObject.pageData) {
+                    const currentRotation = fileObject.pageData.rotations[pageIndex] || 0;
+                    const newRotation = (currentRotation + 90) % 360;
+                    fileObject.pageData.rotations[pageIndex] = newRotation;
+                    canvas.style.transform = `rotate(${newRotation}deg)`;
+                }
+            }
+        }
+        
+        async function savePdfEdits() {
+            if (!currentEditingFileId) return;
+            const fileObject = selectedFiles.find(f => f.id === currentEditingFileId);
+            if (!fileObject) return;
+
+            pdfEditorSaveBtn.disabled = true;
+            pdfEditorSaveBtn.innerHTML = '<div class="loader mx-auto"></div>';
+
+            const newOrder = [...pdfPageList.children].map(item => parseInt(item.dataset.pageIndex));
+            fileObject.pageData.order = newOrder;
+
+            const originalFile = fileObject.originalFile;
+            const arrayBuffer = await originalFile.arrayBuffer();
+            const pdfDoc = await PDFDocument.load(arrayBuffer);
+            const newPdfDoc = await PDFDocument.create();
+
+            for (const pageIndex of fileObject.pageData.order) {
+                const [copiedPage] = await newPdfDoc.copyPages(pdfDoc, [pageIndex]);
+                const rotation = fileObject.pageData.rotations[pageIndex] || 0;
+                copiedPage.setRotation(degrees(rotation));
+                newPdfDoc.addPage(copiedPage);
+            }
+
+            const pdfBytes = await newPdfDoc.save();
+            fileObject.editedBlob = new Blob([pdfBytes], { type: 'application/pdf', name: originalFile.name });
+
+            pdfEditorSaveBtn.disabled = false;
+            pdfEditorSaveBtn.textContent = 'Save Changes';
+            pdfEditorModal.classList.add('hidden');
+            await displayFilePreviews();
+            currentEditingFileId = null;
+        }
+
+        // --- Conversion Logic ---
+        
+        function constructNewFileName(originalName, newExtension, index) {
+            const baseName = originalName.split('.').slice(0, -1).join('.') || originalName;
+            const paddedIndex = String(index).padStart(4, '0');
+            return `${paddedIndex}_${baseName}_RK.${newExtension}`;
+        }
+
+        async function handleConversion() {
+            if (selectedFiles.length === 0) {
+                showMessage("Please select files to convert first.");
+                return;
+            }
+            convertBtn.disabled = true;
+            convertBtn.innerHTML = '<div class="flex items-center justify-center"><div class="loader mr-2"></div>Processing...</div>';
+            resultsContainer.classList.remove('hidden');
+            resultsList.innerHTML = '';
+
+            const outputFormat = outputFormatSelect.value;
+            const conversionModeEl = document.querySelector('input[name="conversion-mode"]:checked');
+            const conversionMode = conversionModeEl ? conversionModeEl.value : 'separate';
+            const combine = selectedFiles.length > 1 ? conversionMode === 'combine' : false;
+            let fileCounter = 0;
+
+            if (outputFormat === 'pdf') {
+                if (combine) {
+                    await processMergeToPdf(selectedFiles, fileCounter);
+                } else {
+                    for (const fileObject of selectedFiles) {
+                        await processFileToPdf(fileObject, fileCounter++);
+                    }
+                }
+            } else { // Image output
+                if (combine) {
+                    await processAllToZip(selectedFiles, `image/${outputFormat}`);
+                } else {
+                    for (const fileObject of selectedFiles) {
+                        await processFileToImage(fileObject, `image/${outputFormat}`, fileCounter++);
+                    }
+                }
+            }
+            
+            convertBtn.disabled = false;
+            convertBtn.innerHTML = 'Convert Files';
+        }
+        
+        async function processFileToImage(fileObject, targetMimeType, index) {
+            const inputFileType = fileObject.type;
+            const outputFormat = targetMimeType.split('/')[1];
+            const newFileExtension = inputFileType === 'pdf' ? 'zip' : outputFormat;
+            const resultCard = createResultCard(fileObject.originalFile.name, newFileExtension, index);
+            resultsList.appendChild(resultCard);
+            const { loader, statusText, downloadLink, previewContainer } = getCardElements(resultCard);
+
+            try {
+                statusText.textContent = 'Converting...';
+                const fileToProcess = fileObject.editedBlob || fileObject.originalFile;
+                let convertedFileBlob;
+                if (inputFileType === 'pdf') {
+                    convertedFileBlob = await convertPdfToZip(fileToProcess, targetMimeType, (p, t) => statusText.textContent = `Converting page ${p}/${t}...`);
+                } else {
+                    convertedFileBlob = await convertImage(fileToProcess, targetMimeType);
+                }
+                updateCardOnSuccess(convertedFileBlob, fileObject.originalFile.name, newFileExtension, { downloadLink, previewContainer, statusText }, index);
+            } catch (error) {
+                updateCardOnError(error, fileObject.originalFile.name, { statusText });
+            } finally {
+                loader.classList.add('hidden');
+            }
+        }
+        
+        async function processFileToPdf(fileObject, index) {
+            const resultCard = createResultCard(fileObject.originalFile.name, 'pdf', index);
+            resultsList.appendChild(resultCard);
+            const { loader, statusText, downloadLink, previewContainer } = getCardElements(resultCard);
+            try {
+                statusText.textContent = 'Converting to PDF...';
+                const pdfBlob = await mergeFilesToPdf([fileObject]);
+                updateCardOnSuccess(pdfBlob, fileObject.originalFile.name, 'pdf', { downloadLink, previewContainer, statusText }, index);
+            } catch(error) {
+                updateCardOnError(error, fileObject.originalFile.name, { statusText });
+            } finally {
+                loader.classList.add('hidden');
+            }
+        }
+
+        async function processMergeToPdf(fileObjects, index) {
+            const resultCard = createResultCard('merged_document', 'pdf', index);
+            resultsList.appendChild(resultCard);
+            const { loader, statusText, downloadLink, previewContainer } = getCardElements(resultCard);
+            try {
+                statusText.textContent = 'Merging files into PDF...';
+                const mergedPdfBlob = await mergeFilesToPdf(fileObjects, (i, t, name) => statusText.textContent = `Processing ${i}/${t}: ${name}`);
+                updateCardOnSuccess(mergedPdfBlob, 'merged_document', 'pdf', { downloadLink, previewContainer, statusText }, index);
+            } catch(error) {
+                updateCardOnError(error, 'merge operation', { statusText });
+            } finally {
+                loader.classList.add('hidden');
+            }
+        }
+
+        async function processAllToZip(fileObjects, targetMimeType) {
+            const resultCard = createResultCard('combined_files', 'zip', 0);
+            resultsList.appendChild(resultCard);
+            const { loader, statusText, downloadLink, previewContainer } = getCardElements(resultCard);
+            try {
+                statusText.textContent = 'Combining all files into ZIP...';
+                const zipBlob = await convertAllToZip(fileObjects, targetMimeType, (i, t, name) => statusText.textContent = `Processing ${i}/${t}: ${name}`);
+                updateCardOnSuccess(zipBlob, 'combined_files', 'zip', { downloadLink, previewContainer, statusText }, 0);
+            } catch (error) {
+                updateCardOnError(error, 'zip operation', { statusText });
+            } finally {
+                loader.classList.add('hidden');
+            }
+        }
+        
+        function getCardElements(card) {
+            return {
+                loader: card.querySelector('.loader'),
+                statusText: card.querySelector('.status-text'),
+                downloadLink: card.querySelector('.download-link'),
+                previewContainer: card.querySelector('.preview-container')
+            };
+        }
+        
+        function updateCardOnSuccess(blob, originalName, newExtension, elements, index) {
+            const { downloadLink, previewContainer, statusText } = elements;
+            if (!blob) return;
+            const url = URL.createObjectURL(blob);
+            downloadLink.href = url;
+            downloadLink.download = constructNewFileName(originalName, newExtension, index);
+            downloadLink.classList.remove('hidden');
+            previewContainer.innerHTML = getIconForFileType(newExtension);
+            statusText.textContent = 'Success!';
+            statusText.classList.remove('text-slate-500');
+            statusText.classList.add('text-green-600', 'font-semibold');
+        }
+
+        function updateCardOnError(error, fileName, { statusText }) {
+             console.error("Conversion error for", fileName, ":", error);
+             statusText.textContent = `Error: ${error.message}`;
+             statusText.classList.remove('text-slate-500');
+             statusText.classList.add('text-red-600', 'font-semibold');
+        }
+
+        function createResultCard(originalName, outputExtension, index) {
+            const card = document.createElement('div');
+            card.className = 'bg-white p-4 rounded-lg shadow-md border flex flex-col md:flex-row items-center gap-4';
+            const newFileName = constructNewFileName(originalName, outputExtension, index);
+            card.innerHTML = `
+                <div class="preview-container w-24 h-24 bg-slate-100 rounded-md flex items-center justify-center flex-shrink-0"><div class="loader"></div></div>
+                <div class="flex-grow text-center md:text-left">
+                    <p class="font-bold text-slate-800 truncate" title="${newFileName}">${newFileName}</p>
+                    <p class="text-sm text-slate-600 truncate">Original: ${originalName}</p>
+                    <p class="status-text text-sm text-slate-500 mt-1">Initializing...</p>
+                </div>
+                <a href="#" class="download-link hidden w-full md:w-auto text-center bg-green-500 text-white font-semibold py-2 px-4 rounded-lg hover:bg-green-600 transition-colors">Download</a>
+            `;
+            return card;
+        }
+
+        function convertImage(file, targetMimeType) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        const canvas = document.createElement('canvas');
+                        canvas.width = img.width;
+                        canvas.height = img.height;
+                        canvas.getContext('2d').drawImage(img, 0, 0);
+                        canvas.toBlob(resolve, targetMimeType, 0.95);
+                    };
+                    img.onerror = () => reject(new Error('Could not load image.'));
+                    img.src = e.target.result;
+                };
+                reader.onerror = () => reject(new Error('Could not read file.'));
+                reader.readAsDataURL(file);
+            });
+        }
+        
+        async function convertPdfToZip(file, targetMimeType, onProgress) {
+            const zip = new window.JSZip();
+            const outputFormat = targetMimeType.split('/')[1];
+            const arrayBuffer = await file.arrayBuffer();
+            const pdfDoc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+            for (let i = 1; i <= pdfDoc.numPages; i++) {
+                if (onProgress) onProgress(i, pdfDoc.numPages);
+                const page = await pdfDoc.getPage(i);
+                const viewport = page.getViewport({ scale: 2.0 });
+                const canvas = document.createElement('canvas');
+                const context = canvas.getContext('2d');
+                canvas.height = viewport.height;
+                canvas.width = viewport.width;
+                await page.render({ canvasContext: context, viewport: viewport }).promise;
+                const blob = await new Promise(resolve => canvas.toBlob(resolve, targetMimeType, 0.95));
+                if (blob) zip.file(`page_${i}.${outputFormat}`, blob);
+            }
+            return zip.generateAsync({ type: 'blob' });
+        }
+        
+        async function mergeFilesToPdf(fileObjects, onProgress) {
+            const mergedPdf = await PDFDocument.create();
+            for (let i = 0; i < fileObjects.length; i++) {
+                const fileObject = fileObjects[i];
+                if (onProgress) onProgress(i + 1, fileObjects.length, fileObject.originalFile.name);
+                const fileToProcess = fileObject.editedBlob || fileObject.originalFile;
+                const arrayBuffer = await fileToProcess.arrayBuffer();
+
+                // FIX: Use the stored type from the fileObject
+                if (fileObject.type === 'pdf') {
+                    const donorPdf = await PDFDocument.load(arrayBuffer);
+                    const indices = donorPdf.getPageIndices();
+                    const copiedPages = await mergedPdf.copyPages(donorPdf, indices);
+                    copiedPages.forEach((page) => mergedPdf.addPage(page));
+                } else { // Assumes image
+                    let image;
+                    // FIX: Use original file type to determine embedding, as edited blob might be generic
+                    if (fileObject.originalFile.type === 'image/png') image = await mergedPdf.embedPng(arrayBuffer);
+                    else image = await mergedPdf.embedJpg(arrayBuffer);
+                    const page = mergedPdf.addPage([image.width, image.height]);
+                    page.drawImage(image, { x: 0, y: 0, width: image.width, height: image.height });
+                }
+            }
+            const pdfBytes = await mergedPdf.save();
+            return new Blob([pdfBytes], { type: 'application/pdf' });
+        }
+        
+        async function convertAllToZip(fileObjects, targetMimeType, onProgress) {
+            const zip = new window.JSZip();
+            const outputFormat = targetMimeType.split('/')[1];
+            let zipFileCounter = 0;
+
+            for (let i = 0; i < fileObjects.length; i++) {
+                const fileObject = fileObjects[i];
+                if (onProgress) onProgress(i + 1, fileObjects.length, fileObject.originalFile.name);
+                const fileToProcess = fileObject.editedBlob || fileObject.originalFile;
+                // FIX: Use the stored type from the fileObject, not from the potentially nameless blob
+                const fileType = fileObject.type;
+
+                if (fileType === 'pdf') {
+                    const arrayBuffer = await fileToProcess.arrayBuffer();
+                    const pdfDoc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+                    for (let p = 1; p <= pdfDoc.numPages; p++) {
+                        if (zipFileCounter >= 10000) break;
+                        const page = await pdfDoc.getPage(p);
+                        const viewport = page.getViewport({ scale: 2.0 });
+                        const canvas = document.createElement('canvas');
+                        const context = canvas.getContext('2d');
+                        canvas.height = viewport.height;
+                        canvas.width = viewport.width;
+                        await page.render({ canvasContext: context, viewport: viewport }).promise;
+                        const blob = await new Promise(resolve => canvas.toBlob(resolve, targetMimeType, 0.95));
+                        if (blob) {
+                            const pageName = `${fileObject.originalFile.name}_page_${p}`;
+                            const newFileName = constructNewFileName(pageName, outputFormat, zipFileCounter++);
+                            zip.file(newFileName, blob);
+                        }
+                    }
+                } else { // It's an image
+                    if (zipFileCounter >= 10000) break;
+                    const convertedBlob = await convertImage(fileToProcess, targetMimeType);
+                    if (convertedBlob) {
+                        const newFileName = constructNewFileName(fileObject.originalFile.name, outputFormat, zipFileCounter++);
+                        zip.file(newFileName, convertedBlob);
+                    }
+                }
+            }
+            
+            return zip.generateAsync({ type: 'blob' });
+        }
+
+    </script>
+</body>
+</html>
